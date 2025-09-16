@@ -4,6 +4,7 @@
  * @fileOverview Summarizes a spreadsheet using AI to provide key insights for business managers.
  *
  * - summarizeSpreadsheet - A function that takes spreadsheet data and returns a summary.
+ * - summarizeSpreadsheetStream - A streaming flow that provides the summary in chunks.
  * - AISpreadsheetSummaryInput - The input type for the summarizeSpreadsheet function.
  * - AISpreadsheetSummaryOutput - The return type for the summarizeSpreadsheet function.
  */
@@ -11,6 +12,7 @@
 import {ai} from '@/ai/genkit';
 import {z} from 'genkit';
 
+// Input Schema (remains the same)
 const AISpreadsheetSummaryInputSchema = z.object({
   spreadsheetData: z
     .string()
@@ -18,6 +20,7 @@ const AISpreadsheetSummaryInputSchema = z.object({
 });
 export type AISpreadsheetSummaryInput = z.infer<typeof AISpreadsheetSummaryInputSchema>;
 
+// Output Schemas for each part of the analysis (remain the same)
 const ColumnAnalysisSchema = z.object({
   columnName: z.string().describe('The name of the column being analyzed.'),
   description: z
@@ -47,6 +50,7 @@ const DataQualityIssueSchema = z.object({
     ),
 });
 
+// Full Output Schema (remains the same)
 const AISpreadsheetSummaryOutputSchema = z.object({
   keyInsights: z
     .array(z.string())
@@ -69,41 +73,135 @@ const AISpreadsheetSummaryOutputSchema = z.object({
 });
 export type AISpreadsheetSummaryOutput = z.infer<typeof AISpreadsheetSummaryOutputSchema>;
 
+// --- NEW: Schemas for Streaming Chunks ---
+const KeyInsightsChunkSchema = z.object({
+  type: z.literal('keyInsights'),
+  data: z.array(z.string()),
+});
+const ColumnAnalysesChunkSchema = z.object({
+  type: z.literal('columnAnalyses'),
+  data: z.array(ColumnAnalysisSchema),
+});
+const RowLevelFindingsChunkSchema = z.object({
+  type: z.literal('rowLevelFindings'),
+  data: z.array(RowFindingSchema),
+});
+const DataQualityIssuesChunkSchema = z.object({
+  type: z.literal('dataQualityIssues'),
+  data: z.array(DataQualityIssueSchema),
+});
+
+export const SpreadsheetAnalysisChunkSchema = z.union([
+  KeyInsightsChunkSchema,
+  ColumnAnalysesChunkSchema,
+  RowLevelFindingsChunkSchema,
+  DataQualityIssuesChunkSchema,
+]);
+export type SpreadsheetAnalysisChunk = z.infer<typeof SpreadsheetAnalysisChunkSchema>;
+
+
+// --- NEW: Smaller, Focused Prompts ---
+
+const keyInsightsPrompt = ai.definePrompt({
+  name: 'keyInsightsPrompt',
+  input: {schema: AISpreadsheetSummaryInputSchema},
+  output: {schema: z.object({ keyInsights: z.array(z.string()) })},
+  prompt: `You are an expert data analyst AI. Analyze the provided spreadsheet data and generate a list of 3-5 high-level, critical insights that a manager should know immediately. These should cover major trends, significant totals, or surprising findings.
+
+  Spreadsheet data:
+  {{spreadsheetData}}`,
+});
+
+const columnAnalysesPrompt = ai.definePrompt({
+  name: 'columnAnalysesPrompt',
+  input: {schema: AISpreadsheetSummaryInputSchema},
+  output: {schema: z.object({ columnAnalyses: z.array(ColumnAnalysisSchema) })},
+  prompt: `You are an expert data analyst AI. For each numeric or otherwise significant column in the provided spreadsheet data, provide a detailed analysis. In your description, detail the trends, distribution (e.g., min, max, average), and any noteworthy patterns or concentrations of data.
+
+  Spreadsheet data:
+  {{spreadsheetData}}`,
+});
+
+const rowLevelFindingsPrompt = ai.definePrompt({
+  name: 'rowLevelFindingsPrompt',
+  input: {schema: AISpreadsheetSummaryInputSchema},
+  output: {schema: z.object({ rowLevelFindings: z.array(RowFindingSchema) })},
+  prompt: `You are an expert data analyst AI. Identify any specific rows that stand out in the provided spreadsheet data. This includes outliers (e.g., the row with the highest sale), records that are particularly representative of a trend, or any anomalies. Refer to the row by its number or by a unique identifier if a clear one exists.
+
+  Spreadsheet data:
+  {{spreadsheetData}}`,
+});
+
+const dataQualityIssuesPrompt = ai.definePrompt({
+  name: 'dataQualityIssuesPrompt',
+  input: {schema: AISpreadsheetSummaryInputSchema},
+  output: {schema: z.object({ dataQualityIssues: z.array(DataQualityIssueSchema) })},
+  prompt: `You are an expert data analyst AI. Carefully examine the provided spreadsheet data for any quality problems. This includes missing values, inconsistent formatting, or logical errors. For each issue, describe the problem and recommend a specific action to fix it.
+
+  Spreadsheet data:
+  {{spreadsheetData}}`,
+});
+
+
+// --- NEW: Streaming Flow ---
+
+export const summarizeSpreadsheetStream = ai.defineFlow(
+  {
+    name: 'summarizeSpreadsheetStream',
+    inputSchema: AISpreadsheetSummaryInputSchema,
+    outputSchema: AISpreadsheetSummaryOutputSchema,
+    streamSchema: SpreadsheetAnalysisChunkSchema,
+  },
+  async (input, {sendChunk}) => {
+    const fullSummary: AISpreadsheetSummaryOutput = {
+      keyInsights: [],
+      columnAnalyses: [],
+      rowLevelFindings: [],
+      dataQualityIssues: [],
+    };
+
+    // 1. Get Key Insights
+    const insightsResult = await keyInsightsPrompt(input);
+    if (insightsResult?.output?.keyInsights.length) {
+      fullSummary.keyInsights = insightsResult.output.keyInsights;
+      sendChunk({type: 'keyInsights', data: insightsResult.output.keyInsights});
+    }
+
+    // 2. Get Column Analyses
+    const columnsResult = await columnAnalysesPrompt(input);
+    if (columnsResult?.output?.columnAnalyses.length) {
+      fullSummary.columnAnalyses = columnsResult.output.columnAnalyses;
+      sendChunk({type: 'columnAnalyses', data: columnsResult.output.columnAnalyses});
+    }
+
+    // 3. Get Row-Level Findings
+    const rowsResult = await rowLevelFindingsPrompt(input);
+    if (rowsResult?.output?.rowLevelFindings.length) {
+      fullSummary.rowLevelFindings = rowsResult.output.rowLevelFindings;
+      sendChunk({type: 'rowLevelFindings', data: rowsResult.output.rowLevelFindings});
+    }
+
+    // 4. Get Data Quality Issues
+    const qualityResult = await dataQualityIssuesPrompt(input);
+    if (qualityResult?.output?.dataQualityIssues.length) {
+      fullSummary.dataQualityIssues = qualityResult.output.dataQualityIssues;
+      sendChunk({type: 'dataQualityIssues', data: qualityResult.output.dataQualityIssues});
+    }
+
+    return fullSummary;
+  }
+);
+
+
+// --- MODIFIED: Original function now uses the streaming flow ---
+// This provides a non-streaming endpoint while reusing the streaming logic.
 export async function summarizeSpreadsheet(
   input: AISpreadsheetSummaryInput
 ): Promise<AISpreadsheetSummaryOutput> {
-  return summarizeSpreadsheetFlow(input);
-}
-
-const summarizeSpreadsheetPrompt = ai.definePrompt({
-  name: 'summarizeSpreadsheetPrompt',
-  input: {schema: AISpreadsheetSummaryInputSchema},
-  output: {schema: AISpreadsheetSummaryOutputSchema},
-  prompt: `You are an expert data analyst AI. Your task is to provide a comprehensive analysis of the given spreadsheet data for a business manager.
-  Be thorough, clear, and provide actionable insights. Refer to specific columns and rows when possible.
-
-  Here is the spreadsheet data:
-  {{spreadsheetData}}
-
-  Please perform the following analysis and structure your output according to the defined schema:
-
-  1.  **Key Insights**: Generate a list of 3-5 high-level, critical insights that a manager should know immediately. These should cover major trends, significant totals, or surprising findings.
-
-  2.  **Column-by-Column Analysis**: For each numeric or otherwise significant column, provide a \`columnAnalyses\` entry. In your description, detail the trends, distribution (e.g., min, max, average), and any noteworthy patterns or concentrations of data.
-
-  3.  **Row-Level Findings**: Identify and create \`rowLevelFindings\` for any specific rows that stand out. This includes outliers (e.g., the row with the highest sale, the product with the lowest stock), records that are particularly representative of a trend, or any anomalies. Refer to the row by its number or by a unique identifier if a clear one exists (like a name or ID column).
-
-  4.  **Data Quality Issues**: Carefully examine the data for any quality problems. Create \`dataQualityIssues\` for things like missing values, inconsistent formatting (e.g., dates in different formats), or logical errors. For each issue, describe the problem and recommend a specific action to fix it (e.g., "In column 'Revenue', cell C5 is empty. Consider filling it with the average revenue or removing the row if it's incomplete.").`,
-});
-
-const summarizeSpreadsheetFlow = ai.defineFlow(
-  {
-    name: 'summarizeSpreadsheetFlow',
-    inputSchema: AISpreadsheetSummaryInputSchema,
-    outputSchema: AISpreadsheetSummaryOutputSchema,
-  },
-  async input => {
-    const {output} = await summarizeSpreadsheetPrompt(input);
-    return output!;
+  const response = await summarizeSpreadsheetStream.stream(input);
+  // drain the stream to get the final output
+  for await (const chunk of response.stream) {
+    // do nothing
   }
-);
+  return await response.output;
+}

@@ -2,7 +2,11 @@
 
 import { aiForecasting } from '@/ai/flows/ai-forecasting';
 import { aiQuestionAnswering } from '@/ai/flows/ai-question-answering';
-import { summarizeSpreadsheet } from '@/ai/flows/ai-spreadsheet-summary';
+import {
+  summarizeSpreadsheet,
+  summarizeSpreadsheetStream,
+  type SpreadsheetAnalysisChunk,
+} from '@/ai/flows/ai-spreadsheet-summary';
 import type { AISummary } from '@/lib/types';
 
 export async function getSummaryAction(spreadsheetData: string): Promise<{ summary: AISummary; error?: string }> {
@@ -23,6 +27,16 @@ export async function getSummaryAction(spreadsheetData: string): Promise<{ summa
         dataQualityIssues: [],
       }
     };
+  }
+}
+
+// --- NEW: Streaming action ---
+export async function* getSummaryActionStream(
+  spreadsheetData: string
+): AsyncGenerator<SpreadsheetAnalysisChunk> {
+  const { stream } = await summarizeSpreadsheetStream.stream({ spreadsheetData });
+  for await (const chunk of stream) {
+    yield chunk;
   }
 }
 

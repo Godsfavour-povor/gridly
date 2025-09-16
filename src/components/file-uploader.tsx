@@ -100,10 +100,10 @@ const FileUploader = React.forwardRef<
       reader.onload = (e) => {
         try {
           const data = e.target?.result;
-          const workbook = XLSX.read(data as ArrayBuffer, { type: 'array' });
+          const workbook = XLSX.read(data as ArrayBuffer, { type: 'array', dense: true });
           const sheetName = workbook.SheetNames[0];
           const worksheet = workbook.Sheets[sheetName];
-          const json: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1, raw: true, dense: true });
+          const json: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1, raw: true });
           const stringData = XLSX.utils.sheet_to_csv(worksheet);
 
           const headers = (json[0] as string[]) || [];

@@ -1,7 +1,9 @@
 'use client';
 
+export const dynamic = 'force-dynamic';
+
 import * as React from 'react';
-import { getChatResponseAction, getSummaryAction, getSummaryActionMulti } from '@/app/actions';
+import { getChatResponseAction, getSummaryAction, getSummaryActionMulti, getSummaryActionStream } from '@/app/actions';
 import AnalysisDashboard from '@/components/analysis-dashboard';
 import FileUploader from '@/components/file-uploader';
 import { Logo } from '@/components/icons';
@@ -116,7 +118,8 @@ export default function Home() {
       const multi = documents && documents.length > 1;
 
       if (multi) {
-        // Start ETA based on combined rows and doc count
+        // Multi-document analysis does not support streaming yet.
+        // It will still use the old, non-streaming action.
         const rowsForEta = (combinedParsedData?.rows?.length ?? parsedData.rows.length) as number;
         const docsForEta = documents?.length ?? 1;
         startAnalysisETA(rowsForEta, docsForEta);
@@ -130,6 +133,10 @@ export default function Home() {
         const id = new Date().toISOString();
         const createdAt = new Date().toISOString();
         const filesLabel = `${fileNames.length} documents: ${fileNames.slice(0, 2).join(', ')}${fileNames.length > 2 ? '…' : ''}`;
+        const aiMessage: ChatMessage = {
+          sender: 'ai',
+          text: `Analyzed ${fileNames.length} documents. Ask a question and I will cite sources in the answer.`,
+        };
 
         const result: AnalysisResult = {
           id,
@@ -145,42 +152,73 @@ export default function Home() {
           documentSummaries: perDoc,
           combinedSummary,
           summary: combinedSummary,
-          chatHistory: [
-            {
-              sender: 'ai',
-              text: `Analyzed ${fileNames.length} documents. Ask a question and I will cite sources in the answer.`,
-            },
-          ],
+          chatHistory: [aiMessage],
         };
 
         setAnalysisResult(result);
         saveRecentFile({ ...result, summary: combinedSummary });
+
       } else {
-        // Single document ETA
-        const rowsForEta = parsedData.rows.length;
-        startAnalysisETA(rowsForEta, 1);
-        const summaryResult = await getSummaryAction(stringData);
-        clearAnalysisETA();
-        if (summaryResult.error) {
-          throw new Error(summaryResult.error);
-        }
-        const result: AnalysisResult = {
+        // --- NEW: Streaming logic for single documents ---
+        setIsLoading(true);
+        setProgressPhase('analyzing');
+        setLoadingMessage('Analyzing with AI...');
+
+        const initialResult: AnalysisResult = {
           id: new Date().toISOString(),
           fileName,
           createdAt: new Date().toISOString(),
           parsedData,
           stringData,
           metrics,
-          summary: summaryResult.summary,
-          chatHistory: [
-            {
-              sender: 'ai',
-              text: `Hello! I've analyzed your spreadsheet and broken it down into key insights, column-specific details, and data quality checks. What specific questions do you have? You can also ask for a forecast (e.g., "project sales for next quarter").`,
-            },
-          ],
+          summary: {
+            keyInsights: [],
+            columnAnalyses: [],
+            rowLevelFindings: [],
+            dataQualityIssues: [],
+          },
+          chatHistory: [],
         };
-        setAnalysisResult(result);
-        saveRecentFile(result);
+        setAnalysisResult(initialResult);
+
+        const stream = getSummaryActionStream(stringData);
+
+        for await (const chunk of stream) {
+          setAnalysisResult((prevResult) => {
+            if (!prevResult) return null;
+            const newSummary = { ...prevResult.summary };
+            switch (chunk.type) {
+              case 'keyInsights':
+                newSummary.keyInsights = chunk.data;
+                break;
+              case 'columnAnalyses':
+                newSummary.columnAnalyses = chunk.data;
+                break;
+              case 'rowLevelFindings':
+                newSummary.rowLevelFindings = chunk.data;
+                break;
+              case 'dataQualityIssues':
+                newSummary.dataQualityIssues = chunk.data;
+                break;
+            }
+            return { ...prevResult, summary: newSummary };
+          });
+        }
+
+        // After the stream is complete, update the chat history and save the final result.
+        setAnalysisResult((prevResult) => {
+          if (!prevResult) return null;
+          const aiMessage: ChatMessage = {
+            sender: 'ai',
+            text: `Hello! I've analyzed your spreadsheet and broken it down into key insights, column-specific details, and data quality checks. What specific questions do you have? You can also ask for a forecast (e.g., "project sales for next quarter").`,
+          };
+          const finalResult = {
+            ...prevResult,
+            chatHistory: [aiMessage],
+          };
+          saveRecentFile(finalResult);
+          return finalResult;
+        });
       }
 
     } catch (e: any) {
@@ -194,6 +232,7 @@ export default function Home() {
       });
     } finally {
       setIsLoading(false);
+      clearAnalysisETA();
     }
   };
 
