@@ -68,7 +68,7 @@ const AISpreadsheetSummaryOutputSchema = z.object({
   dataQualityIssues: z
     .array(DataQualityIssueSchema)
     .describe(
-      'A list of potential data quality issues, like missing values or inconsistencies, with recommendations for fixing them.'
+      'A list of potential data quality issues, like missing values, or inconsistencies, with recommendations for fixing them.'
     ),
 });
 export type AISpreadsheetSummaryOutput = z.infer<typeof AISpreadsheetSummaryOutputSchema>;
@@ -108,6 +108,8 @@ const keyInsightsPrompt = ai.definePrompt({
   output: {schema: z.object({ keyInsights: z.array(z.string()) })},
   prompt: `You are an expert data analyst AI. Analyze the provided spreadsheet data and generate a list of 3-5 high-level, critical insights that a manager should know immediately. These should cover major trends, significant totals, or surprising findings.
 
+  Your output MUST be a valid JSON object that conforms to the following Zod schema: { "keyInsights": z.array(z.string()) }.
+
   Spreadsheet data:
   {{spreadsheetData}}`,
 });
@@ -117,6 +119,8 @@ const columnAnalysesPrompt = ai.definePrompt({
   input: {schema: AISpreadsheetSummaryInputSchema},
   output: {schema: z.object({ columnAnalyses: z.array(ColumnAnalysisSchema) })},
   prompt: `You are an expert data analyst AI. For each numeric or otherwise significant column in the provided spreadsheet data, provide a detailed analysis. In your description, detail the trends, distribution (e.g., min, max, average), and any noteworthy patterns or concentrations of data.
+
+  Your output MUST be a valid JSON object that conforms to the following Zod schema: { "columnAnalyses": z.array(z.object({ columnName: z.string(), description: z.string() })) }.
 
   Spreadsheet data:
   {{spreadsheetData}}`,
@@ -128,6 +132,8 @@ const rowLevelFindingsPrompt = ai.definePrompt({
   output: {schema: z.object({ rowLevelFindings: z.array(RowFindingSchema) })},
   prompt: `You are an expert data analyst AI. Identify any specific rows that stand out in the provided spreadsheet data. This includes outliers (e.g., the row with the highest sale), records that are particularly representative of a trend, or any anomalies. Refer to the row by its number or by a unique identifier if a clear one exists.
 
+  Your output MUST be a valid JSON object that conforms to the following Zod schema: { "rowLevelFindings": z.array(z.object({ rowIdentifier: z.string(), finding: z.string() })) }.
+
   Spreadsheet data:
   {{spreadsheetData}}`,
 });
@@ -137,6 +143,8 @@ const dataQualityIssuesPrompt = ai.definePrompt({
   input: {schema: AISpreadsheetSummaryInputSchema},
   output: {schema: z.object({ dataQualityIssues: z.array(DataQualityIssueSchema) })},
   prompt: `You are an expert data analyst AI. Carefully examine the provided spreadsheet data for any quality problems. This includes missing values, inconsistent formatting, or logical errors. For each issue, describe the problem and recommend a specific action to fix it.
+
+  Your output MUST be a valid JSON object that conforms to the following Zod schema: { "dataQualityIssues": z.array(z.object({ issue: z.string(), recommendation: z.string() })) }.
 
   Spreadsheet data:
   {{spreadsheetData}}`,
