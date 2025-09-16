@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { getChatResponseAction, getSummaryAction } from '@/app/actions';
+import { getChatResponseAction, getSummaryAction, getSummaryActionMulti } from '@/app/actions';
 import AnalysisDashboard from '@/components/analysis-dashboard';
 import FileUploader from '@/components/file-uploader';
 import { Logo } from '@/components/icons';
@@ -39,6 +39,12 @@ export default function Home() {
   const [showWelcome, setShowWelcome] = React.useState(false);
   const [welcomeStep, setWelcomeStep] = React.useState(0);
   const [recentFiles, setRecentFiles] = React.useState<RecentFile[]>([]);
+  // Dynamic progress and ETA
+  const [progressPhase, setProgressPhase] = React.useState<'idle'|'preparing'|'reading'|'combining'|'analyzing'|'finalizing'>('idle');
+  const [progressCurrent, setProgressCurrent] = React.useState<number>(0);
+  const [progressTotal, setProgressTotal] = React.useState<number>(0);
+  const [etaMs, setEtaMs] = React.useState<number>(0);
+  const analysisEtaTimer = React.useRef<NodeJS.Timeout | null>(null);
 
   React.useEffect(() => {
     const hasVisited = localStorage.getItem('hasVisited');
@@ -77,12 +83,22 @@ export default function Home() {
     metrics,
     errors,
     fileName,
+    documents,
+    combinedParsedData,
+    combinedStringData,
+    combinedMetrics,
+    fileNames,
   }: {
     parsedData: ParsedData;
     stringData: string;
     metrics: Metrics;
     errors: string[];
     fileName: string;
+    documents: any[];
+    combinedParsedData: ParsedData;
+    combinedStringData: string;
+    combinedMetrics: Metrics;
+    fileNames: string[];
   }) => {
     setIsLoading(true);
     setError(null);
@@ -97,29 +113,75 @@ export default function Home() {
     }
 
     try {
-      const summaryResult = await getSummaryAction(stringData);
-      if (summaryResult.error) {
-        throw new Error(summaryResult.error);
+      const multi = documents && documents.length > 1;
+
+      if (multi) {
+        // Start ETA based on combined rows and doc count
+        const rowsForEta = (combinedParsedData?.rows?.length ?? parsedData.rows.length) as number;
+        const docsForEta = documents?.length ?? 1;
+        startAnalysisETA(rowsForEta, docsForEta);
+        const { combinedSummary, perDoc, error: multiErr } = await getSummaryActionMulti(
+          documents.map((d: any) => ({ fileName: d.fileName, stringData: d.stringData })),
+          combinedStringData
+        );
+        clearAnalysisETA();
+        if (multiErr) throw new Error(multiErr);
+
+        const id = new Date().toISOString();
+        const createdAt = new Date().toISOString();
+        const filesLabel = `${fileNames.length} documents: ${fileNames.slice(0, 2).join(', ')}${fileNames.length > 2 ? '…' : ''}`;
+
+        const result: AnalysisResult = {
+          id,
+          fileName: filesLabel,
+          createdAt,
+          parsedData,
+          stringData,
+          metrics,
+          documents,
+          combinedParsedData,
+          combinedStringData,
+          combinedMetrics,
+          documentSummaries: perDoc,
+          combinedSummary,
+          summary: combinedSummary,
+          chatHistory: [
+            {
+              sender: 'ai',
+              text: `Analyzed ${fileNames.length} documents. Ask a question and I will cite sources in the answer.`,
+            },
+          ],
+        };
+
+        setAnalysisResult(result);
+        saveRecentFile({ ...result, summary: combinedSummary });
+      } else {
+        // Single document ETA
+        const rowsForEta = parsedData.rows.length;
+        startAnalysisETA(rowsForEta, 1);
+        const summaryResult = await getSummaryAction(stringData);
+        clearAnalysisETA();
+        if (summaryResult.error) {
+          throw new Error(summaryResult.error);
+        }
+        const result: AnalysisResult = {
+          id: new Date().toISOString(),
+          fileName,
+          createdAt: new Date().toISOString(),
+          parsedData,
+          stringData,
+          metrics,
+          summary: summaryResult.summary,
+          chatHistory: [
+            {
+              sender: 'ai',
+              text: `Hello! I've analyzed your spreadsheet and broken it down into key insights, column-specific details, and data quality checks. What specific questions do you have? You can also ask for a forecast (e.g., "project sales for next quarter").`,
+            },
+          ],
+        };
+        setAnalysisResult(result);
+        saveRecentFile(result);
       }
-      
-      const result: AnalysisResult = {
-        id: new Date().toISOString(),
-        fileName,
-        createdAt: new Date().toISOString(),
-        parsedData,
-        stringData,
-        metrics,
-        summary: summaryResult.summary,
-        chatHistory: [
-          {
-            sender: 'ai',
-            text: `Hello! I've analyzed your spreadsheet and broken it down into key insights, column-specific details, and data quality checks. What specific questions do you have? You can also ask for a forecast (e.g., "project sales for next quarter").`,
-          },
-        ],
-      };
-      
-      setAnalysisResult(result);
-      saveRecentFile(result);
 
     } catch (e: any) {
       const errorMessage =
@@ -174,6 +236,54 @@ export default function Home() {
   }
 
 
+  const handleProgress = (p: { phase: 'preparing'|'reading'|'combining'; current?: number; total?: number; etaMs?: number; note?: string }) => {
+    setIsLoading(true);
+    setProgressPhase(p.phase);
+    if (typeof p.current === 'number') setProgressCurrent(p.current);
+    if (typeof p.total === 'number') setProgressTotal(p.total!);
+    if (typeof p.etaMs === 'number') setEtaMs(p.etaMs!);
+
+    const phaseLabel = p.phase === 'preparing'
+      ? 'Preparing documents'
+      : p.phase === 'reading'
+      ? 'Reading documents'
+      : 'Combining documents';
+
+    const countStr = p.total ? ` (${Math.min((p.current||0), p.total)}/${p.total})` : '';
+    const etaStr = p.etaMs ? ` • ~${Math.ceil(p.etaMs/1000)}s remaining` : '';
+    setLoadingMessage(`${phaseLabel}${countStr}${etaStr}${p.note ? ` • ${p.note}` : ''}`);
+  };
+
+  const startAnalysisETA = (rows: number, docs: number) => {
+    setProgressPhase('analyzing');
+    // Heuristic ETA based on rows and document count
+    const predicted = Math.max(2000, Math.min(30000, 500 + rows * 5 + docs * 800));
+    const start = Date.now();
+    setEtaMs(predicted);
+    setLoadingMessage(`Analyzing with AI • ~${Math.ceil(predicted/1000)}s remaining`);
+    if (analysisEtaTimer.current) clearInterval(analysisEtaTimer.current);
+    analysisEtaTimer.current = setInterval(() => {
+      const elapsed = Date.now() - start;
+      const remaining = Math.max(0, predicted - elapsed);
+      setEtaMs(remaining);
+      setLoadingMessage(`Analyzing with AI • ~${Math.ceil(remaining/1000)}s remaining`);
+      if (remaining <= 0 && analysisEtaTimer.current) {
+        clearInterval(analysisEtaTimer.current);
+        analysisEtaTimer.current = null;
+      }
+    }, 500);
+  };
+
+  const clearAnalysisETA = () => {
+    if (analysisEtaTimer.current) {
+      clearInterval(analysisEtaTimer.current);
+      analysisEtaTimer.current = null;
+    }
+    setProgressPhase('finalizing');
+    setLoadingMessage('Almost done… finalizing');
+    setEtaMs(0);
+  };
+
   const handleNewQuestion = async (question: string) => {
     if (!analysisResult) return;
 
@@ -184,7 +294,9 @@ export default function Home() {
     setAnalysisResult({ ...analysisResult, chatHistory: newHistory });
 
     const response = await getChatResponseAction(
-      analysisResult.stringData,
+      analysisResult.combinedStringData
+        ? `You are answering questions about multiple documents. Use the document sections and cite sources in parentheses.\n\n${analysisResult.combinedStringData}`
+        : analysisResult.stringData,
       question
     );
 
@@ -216,6 +328,7 @@ export default function Home() {
 
     const doc = new jsPDF();
     const { summary, fileName } = analysisResult;
+    const combined = (analysisResult as any).combinedSummary || summary;
     let yPos = 15;
     const pageHeight = doc.internal.pageSize.height;
     const margin = 15;
@@ -240,60 +353,136 @@ export default function Home() {
     yPos += 10;
 
     doc.setFontSize(14);
-    yPos = addText('Key Insights', 10, yPos);
+    yPos = addText('Cross-Document Key Insights', 10, yPos);
     yPos += 5;
     doc.setFontSize(10);
-    summary.keyInsights.forEach(insight => {
+    (combined.keyInsights || summary.keyInsights).forEach((insight: string) => {
         yPos = addText(`- ${insight}`, 15, yPos);
         yPos += 1;
     });
     yPos += 10;
 
     doc.setFontSize(14);
-    yPos = addText('Column-by-Column Analysis', 10, yPos);
+    yPos = addText('Cross-Document Column-by-Column Analysis', 10, yPos);
     yPos += 5;
     doc.setFontSize(10);
-    summary.columnAnalyses.forEach(col => {
+    (combined.columnAnalyses || summary.columnAnalyses).forEach((col: any) => {
         if (yPos > pageHeight - 40) { doc.addPage(); yPos = margin; }
-        doc.setFont(undefined, 'bold');
+        doc.setFont('helvetica', 'bold');
         yPos = addText(col.columnName, 15, yPos);
-        doc.setFont(undefined, 'normal');
+        doc.setFont('helvetica', 'normal');
         yPos = addText(col.description, 15, yPos);
         yPos += 5;
     });
     yPos += 5;
 
-    if (summary.rowLevelFindings.length > 0) {
+    if ((combined.rowLevelFindings || summary.rowLevelFindings).length > 0) {
         if (yPos > pageHeight - 40) { doc.addPage(); yPos = margin; }
         doc.setFontSize(14);
-        yPos = addText('Noteworthy Rows', 10, yPos);
+        yPos = addText('Cross-Document Noteworthy Rows', 10, yPos);
         yPos += 5;
         doc.setFontSize(10);
-        summary.rowLevelFindings.forEach(row => {
+        (combined.rowLevelFindings || summary.rowLevelFindings).forEach((row: any) => {
             if (yPos > pageHeight - 30) { doc.addPage(); yPos = margin; }
-            doc.setFont(undefined, 'bold');
+            doc.setFont('helvetica', 'bold');
             yPos = addText(row.rowIdentifier, 15, yPos);
-            doc.setFont(undefined, 'normal');
+            doc.setFont('helvetica', 'normal');
             yPos = addText(row.finding, 15, yPos);
             yPos += 5;
         });
         yPos += 5;
     }
     
-    if (summary.dataQualityIssues.length > 0) {
+    if ((combined.dataQualityIssues || summary.dataQualityIssues).length > 0) {
         if (yPos > pageHeight - 40) { doc.addPage(); yPos = margin; }
         doc.setFontSize(14);
-        yPos = addText('Data Quality Issues', 10, yPos);
+        yPos = addText('Cross-Document Data Quality Issues', 10, yPos);
         yPos += 5;
         doc.setFontSize(10);
-        summary.dataQualityIssues.forEach(issue => {
+        (combined.dataQualityIssues || summary.dataQualityIssues).forEach((issue: any) => {
             if (yPos > pageHeight - 30) { doc.addPage(); yPos = margin; }
-            doc.setFont(undefined, 'bold');
+            doc.setFont('helvetica', 'bold');
             yPos = addText(issue.issue, 15, yPos);
-            doc.setFont(undefined, 'normal');
+            doc.setFont('helvetica', 'normal');
             yPos = addText(issue.recommendation, 15, yPos);
             yPos += 5;
         });
+    }
+
+    // Per-document sections
+    const docs = (analysisResult as any).documents || [];
+    const perDoc = (analysisResult as any).documentSummaries || {};
+    if (docs.length > 0 && Object.keys(perDoc).length > 0) {
+      doc.addPage();
+      yPos = margin;
+      doc.setFontSize(16);
+      yPos = addText('Per-Document Analysis', 10, yPos);
+      yPos += 5;
+
+      for (const d of docs) {
+        const sum = perDoc[d.fileName];
+        if (!sum) continue;
+        doc.setFontSize(14);
+        yPos = addText(`Document: ${d.fileName}`, 10, yPos);
+        yPos += 3;
+
+        doc.setFontSize(12);
+        yPos = addText('Key Insights', 10, yPos);
+        doc.setFontSize(10);
+        (sum.keyInsights || []).forEach((insight: string) => {
+          yPos = addText(`- ${insight}`, 15, yPos);
+          yPos += 1;
+        });
+        yPos += 5;
+
+        doc.setFontSize(12);
+        yPos = addText('Column-by-Column Analysis', 10, yPos);
+        doc.setFontSize(10);
+        (sum.columnAnalyses || []).forEach((col: any) => {
+          if (yPos > pageHeight - 40) { doc.addPage(); yPos = margin; }
+          doc.setFont('helvetica', 'bold');
+          yPos = addText(col.columnName, 15, yPos);
+          doc.setFont('helvetica', 'normal');
+          yPos = addText(col.description, 15, yPos);
+          yPos += 5;
+        });
+        yPos += 5;
+
+        if ((sum.rowLevelFindings || []).length > 0) {
+          if (yPos > pageHeight - 40) { doc.addPage(); yPos = margin; }
+          doc.setFontSize(12);
+          yPos = addText('Noteworthy Rows', 10, yPos);
+          yPos += 5;
+          doc.setFontSize(10);
+          (sum.rowLevelFindings || []).forEach((row: any) => {
+            if (yPos > pageHeight - 30) { doc.addPage(); yPos = margin; }
+            doc.setFont('helvetica', 'bold');
+            yPos = addText(row.rowIdentifier, 15, yPos);
+            doc.setFont('helvetica', 'normal');
+            yPos = addText(row.finding, 15, yPos);
+            yPos += 5;
+          });
+          yPos += 5;
+        }
+
+        if ((sum.dataQualityIssues || []).length > 0) {
+          if (yPos > pageHeight - 40) { doc.addPage(); yPos = margin; }
+          doc.setFontSize(12);
+          yPos = addText('Data Quality Issues', 10, yPos);
+          yPos += 5;
+          doc.setFontSize(10);
+          (sum.dataQualityIssues || []).forEach((issue: any) => {
+            if (yPos > pageHeight - 30) { doc.addPage(); yPos = margin; }
+            doc.setFont('helvetica', 'bold');
+            yPos = addText(issue.issue, 15, yPos);
+            doc.setFont('helvetica', 'normal');
+            yPos = addText(issue.recommendation, 15, yPos);
+            yPos += 5;
+          });
+        }
+
+        yPos += 8;
+      }
     }
 
     doc.save('ai-analysis-report.pdf');
@@ -378,7 +567,7 @@ export default function Home() {
       </Dialog>
       <header className="flex h-16 items-center justify-between px-6 border-b bg-background">
         <div className="flex items-center gap-2 font-semibold">
-          <Logo className="h-8 w-auto" />
+          <Logo className="h-12 w-auto" />
         </div>
         <div className="flex items-center gap-2">
             <Sheet>
@@ -430,9 +619,9 @@ export default function Home() {
         </div>
       </header>
 
-      <main className="flex-1">
+      <main className="flex-1 overflow-hidden">
         {!analysisResult ? (
-          <div className="container mx-auto max-w-4xl py-24 text-center">
+          <div className="container mx-auto max-w-4xl py-24 text-center h-full flex flex-col justify-center">
             <h1 className="text-5xl font-bold tracking-tighter">
               Summarize spreadsheets in seconds.
             </h1>
@@ -440,7 +629,7 @@ export default function Home() {
               Upload Excel/CSV → get instant plain-English summary.
             </p>
             <div className='mt-8'>
-              <FileUploader ref={fileUploaderRef} onProcess={handleFileProcess} isLoading={isLoading} loadingMessage={loadingMessage}>
+              <FileUploader ref={fileUploaderRef} onProcess={handleFileProcess} onProgress={handleProgress} isLoading={isLoading} loadingMessage={loadingMessage}>
                 <Button size="lg" onClick={handleTriggerUpload} disabled={isLoading}>
                   {isLoading ? 'Analyzing...' : 'Try it Free'}
                 </Button>
@@ -452,10 +641,12 @@ export default function Home() {
             </div>
           </div>
         ) : (
-          <AnalysisDashboard
-            result={analysisResult}
-            onNewQuestion={handleNewQuestion}
-          />
+          <div className="h-full">
+            <AnalysisDashboard
+              result={analysisResult}
+              onNewQuestion={handleNewQuestion}
+            />
+          </div>
         )}
       </main>
       

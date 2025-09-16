@@ -1,56 +1,21 @@
 import type { SVGProps } from 'react';
+import Image from 'next/image';
 
-export function Logo(props: SVGProps<SVGSVGElement>) {
+interface LogoProps {
+  className?: string;
+  width?: number;
+  height?: number;
+}
+
+export function Logo({ className = "h-8 w-auto", width = 132, height = 32 }: LogoProps) {
   return (
-    <svg
-      width="132"
-      height="32"
-      viewBox="0 0 132 32"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-      {...props}
-    >
-      <g clipPath="url(#clip0_103_2)">
-        <path
-          d="M17.8421 21.3218H10.2105V24.3168H20.8421V10.1334H17.8421V21.3218Z"
-          fill="#0B2B6B"
-        />
-        <path
-          d="M20.8421 7.13831H10.2105V10.1333H20.8421V7.13831Z"
-          fill="#0B2B6B"
-        />
-        <path
-          d="M23.8421 7.13831H10.2105V4.14331H23.8421V7.13831Z"
-          fill="#1C408C"
-        />
-        <path d="M7.36841 18.3268H1.57895V15.3318H7.36841V18.3268Z" fill="#1AD9FF" />
-        <path d="M7.36841 15.3318H4.47368V12.3368H7.36841V15.3318Z" fill="#1BC2E6" />
-        <path d="M7.36841 12.3368H4.47368V9.3418H7.36841V12.3368Z" fill="#1CB4D1" />
-        <path d="M10.2105 12.3368H7.36842V9.3418H10.2105V12.3368Z" fill="#1C9FC0" />
-        <path d_name="word-GRIDLY" d="M37.9579 19.3418H35V16.6468H37.9579C39.5368 16.6468 40.5474 15.6518 40.5474 14.1618C40.5474 12.6718 39.5368 11.6768 37.9579 11.6768H35V8.98181H37.9789C41.1368 8.98181 43.4947 10.9568 43.4947 14.1618C43.4947 17.3668 41.1368 19.3418 37.9789 19.3418H37.9579ZM49.8737 19.3418H46.9158V8.98181H49.8737V19.3418ZM53.0316 19.3418V8.98181H55.9895V16.6468H61.2V19.3418H53.0316ZM64.3789 19.3418H64.3158L68.8211 12.4568L64.4421 8.98181H68.1053L70.4421 12.1618L72.7789 8.98181H76.3158L72.0632 12.4768L76.5474 19.3418H72.8211L70.4632 15.6318L68.0842 19.3418H64.3789Z" fill="#0B2B6B"/>
-        <path d_name="letter-D" d="M85.7053 19.3418H82.7474V8.98181H85.7053C89.3474 8.98181 92.2421 11.2368 92.2421 14.1618C92.2421 17.0868 89.3474 19.3418 85.7053 19.3418ZM85.6211 11.6768H85.5789V16.6468H85.6211C87.6421 16.6468 89.2 15.6318 89.2 14.1618C89.2 12.6918 87.6421 11.6768 85.6211 11.6768Z" fill="#1AD9FF"/>
-        <path d_name="letter-R" d="M49.8737 19.3418H46.9158V8.98181H49.8737V19.3418Z" transform="translate(30.5,0)" fill="#0B2B6B"/>
-        <path d="M49.8737 8.98181H46.9158L49.8737 13.1218V8.98181Z" transform="translate(30.5,0)" fill="#0B2B6B"/>
-        <path d="M49.8737 13.1218L46.9158 19.3418H49.8737L49.8737 13.1218Z" transform="translate(30.5,0)" fill="#0B2B6B"/>
-        <path d="M49.8737 13.1218C51.7158 13.1218 53.0316 12.1818 53.0316 11.0518C53.0316 9.92181 51.7158 8.98181 49.8737 8.98181" fill="#0B2B6B" transform="translate(30.5,0)"/>
-        <path d_name="dot-on-i" d="M78.6105 6.36681C78.6105 7.15681 77.9684 7.79181 77.1789 7.79181C76.3895 7.79181 75.7474 7.15681 75.7474 6.36681C75.7474 5.57681 76.3895 4.94181 77.1789 4.94181C77.9684 4.94181 78.6105 5.57681 78.6105 6.36681Z" fill="#1AD9FF" />
-        <text
-          fill="#374151"
-          xmlSpace="preserve"
-          style={{whiteSpace: 'pre'}}
-          fontFamily="Inter"
-          fontSize="5"
-          fontWeight="500"
-          letterSpacing="0em"
-        >
-          <tspan x="62.4" y="24.4633">Smart Summaries, Instantly.</tspan>
-        </text>
-      </g>
-      <defs>
-        <clipPath id="clip0_103_2">
-          <rect width="132" height="32" fill="white" />
-        </clipPath>
-      </defs>
-    </svg>
+    <Image
+      src="/gridly-logo.png"
+      alt="Gridly Logo"
+      width={width}
+      height={height}
+      className={className}
+      priority
+    />
   );
 }

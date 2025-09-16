@@ -14,6 +14,15 @@ export type Metrics = {
   };
 };
 
+// Represents one uploaded document (file) and its parsed data/metrics
+export type DocumentData = {
+  id: string; // stable per-session ID
+  fileName: string;
+  parsedData: ParsedData;
+  stringData: string;
+  metrics: Metrics;
+};
+
 export type ChatMessage = {
   sender: 'user' | 'ai';
   text: string;
@@ -50,6 +59,13 @@ export type AnalysisResult = {
   metrics: Metrics;
   summary: AISummary;
   chatHistory: ChatMessage[];
+  // Multi-document extensions (optional for backward compatibility)
+  documents?: DocumentData[];
+  combinedParsedData?: ParsedData;
+  combinedStringData?: string;
+  combinedMetrics?: Metrics;
+  documentSummaries?: Record<string, AISummary>;
+  combinedSummary?: AISummary;
 };
 
 export type RecentFile = {
