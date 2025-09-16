@@ -355,6 +355,7 @@ export default function AnalysisDashboard({
     : [];
 
   const isAiResponding =
+    result.chatHistory.length > 0 &&
     result.chatHistory[result.chatHistory.length - 1].sender === 'user';
 
   const ChatPanel = (
