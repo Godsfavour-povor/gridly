@@ -460,14 +460,22 @@ export default function AnalysisDashboard({
                   </div>
                 </CardHeader>
                 <CardContent>
-                  <ul className="space-y-3">
-                    {keyInsights.map((insight, index) => (
-                      <li key={index} className="flex items-start gap-3">
-                        <Check className="mt-1 h-4 w-4 flex-shrink-0 text-success" />
-                        <p className="text-sm font-medium">{insight}</p>
-                      </li>
-                    ))}
-                  </ul>
+                  {keyInsights.length === 0 ? (
+                    <div className="space-y-3 py-2">
+                      <Skeleton className="h-5 w-4/5" />
+                      <Skeleton className="h-5 w-full" />
+                      <Skeleton className="h-5 w-5/6" />
+                    </div>
+                  ) : (
+                    <ul className="space-y-3">
+                      {keyInsights.map((insight, index) => (
+                        <li key={index} className="flex items-start gap-3">
+                          <Check className="mt-1 h-4 w-4 flex-shrink-0 text-green-500" />
+                          <p className="text-sm font-medium">{insight}</p>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </CardContent>
               </Card>
 
@@ -482,29 +490,42 @@ export default function AnalysisDashboard({
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  {columnAnalyses.map((analysis, index) => (
-                    <div key={index} className="rounded-lg border bg-background p-4">
-                      <h4 className="font-semibold">{analysis.columnName}</h4>
-                      <p className="mt-1 text-sm text-muted-foreground">
-                        {analysis.description}
-                      </p>
+                  {columnAnalyses.length === 0 ? (
+                    <div className="space-y-4 py-2">
+                      <Skeleton className="h-16 w-full" />
+                      <Skeleton className="h-16 w-full" />
                     </div>
-                  ))}
+                  ) : (
+                    columnAnalyses.map((analysis, index) => (
+                      <div key={index} className="rounded-lg border bg-background p-4">
+                        <h4 className="font-semibold">{analysis.columnName}</h4>
+                        <p className="mt-1 text-sm text-muted-foreground">
+                          {analysis.description}
+                        </p>
+                      </div>
+                    ))
+                  )}
                 </CardContent>
               </Card>
 
-              {rowLevelFindings.length > 0 && (
-                <Card>
-                  <CardHeader className="flex flex-row items-center gap-3">
-                    <Target className="h-6 w-6 text-primary" />
-                    <div>
-                      <CardTitle>Noteworthy Rows</CardTitle>
-                      <CardDescription>
-                        Specific rows with interesting data points or anomalies.
-                      </CardDescription>
+              <Card>
+                <CardHeader className="flex flex-row items-center gap-3">
+                  <Target className="h-6 w-6 text-primary" />
+                  <div>
+                    <CardTitle>Noteworthy Rows</CardTitle>
+                    <CardDescription>
+                      Specific rows with interesting data points or anomalies.
+                    </CardDescription>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  {rowLevelFindings.length === 0 ? (
+                    <div className="space-y-2 py-2">
+                      <Skeleton className="h-8 w-full" />
+                      <Skeleton className="h-8 w-full" />
+                      <Skeleton className="h-8 w-full" />
                     </div>
-                  </CardHeader>
-                  <CardContent>
+                  ) : (
                     <ShadcnTable>
                       <TableHeader>
                         <TableRow>
@@ -521,22 +542,27 @@ export default function AnalysisDashboard({
                         ))}
                       </TableBody>
                     </ShadcnTable>
-                  </CardContent>
-                </Card>
-              )}
+                  )}
+                </CardContent>
+              </Card>
 
-              {dataQualityIssues.length > 0 && (
-                <Card>
-                  <CardHeader className="flex flex-row items-center gap-3">
-                    <AlertTriangle className="h-6 w-6 text-destructive" />
-                    <div>
-                      <CardTitle>Data Quality Check</CardTitle>
-                      <CardDescription>
-                        Potential issues found in your data and how to fix them.
-                      </CardDescription>
+              <Card>
+                <CardHeader className="flex flex-row items-center gap-3">
+                  <AlertTriangle className="h-6 w-6 text-destructive" />
+                  <div>
+                    <CardTitle>Data Quality Check</CardTitle>
+                    <CardDescription>
+                      Potential issues found in your data and how to fix them.
+                    </CardDescription>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  {dataQualityIssues.length === 0 ? (
+                     <div className="space-y-2 py-2">
+                      <Skeleton className="h-8 w-full" />
+                      <Skeleton className="h-8 w-full" />
                     </div>
-                  </CardHeader>
-                  <CardContent>
+                  ) : (
                     <ShadcnTable>
                       <TableHeader>
                         <TableRow>
@@ -553,9 +579,9 @@ export default function AnalysisDashboard({
                         ))}
                       </TableBody>
                     </ShadcnTable>
-                  </CardContent>
-                </Card>
-              )}
+                  )}
+                </CardContent>
+              </Card>
             </TabsContent>
 
             {/* Data Explorer with Filters and New Visuals */}

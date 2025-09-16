@@ -112,6 +112,8 @@ export default function Home() {
         title: 'Error processing file',
         description: errors.join(' '),
       });
+      setIsLoading(false);
+      return;
     }
 
     try {
@@ -157,13 +159,10 @@ export default function Home() {
 
         setAnalysisResult(result);
         saveRecentFile({ ...result, summary: combinedSummary });
+        setIsLoading(false);
 
       } else {
         // --- NEW: Streaming logic for single documents ---
-        setIsLoading(true);
-        setProgressPhase('analyzing');
-        setLoadingMessage('Analyzing with AI...');
-
         const initialResult: AnalysisResult = {
           id: new Date().toISOString(),
           fileName,
@@ -180,6 +179,7 @@ export default function Home() {
           chatHistory: [],
         };
         setAnalysisResult(initialResult);
+        setIsLoading(false); // Stop loading to show dashboard
 
         const stream = getSummaryActionStream(stringData);
 
@@ -230,9 +230,7 @@ export default function Home() {
         title: 'Analysis Failed',
         description: errorMessage,
       });
-    } finally {
       setIsLoading(false);
-      clearAnalysisETA();
     }
   };
 
