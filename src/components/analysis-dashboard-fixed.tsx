@@ -136,6 +136,7 @@ function formatInsight(insight: string) {
     );
   }).filter(Boolean);
 }
+
 function getColumnIndex(headers: string[], name: string) {
   return headers.indexOf(name);
 }
@@ -439,7 +440,7 @@ export default function AnalysisDashboard({
     const addText = (text: string, x: number, y: number, options: any = {}) => {
       doc.setFontSize(options.fontSize || 10);
       const splitText = doc.splitTextToSize(text, 180);
-      const textHeight = doc.getTextDimensions(splitText).h;
+      const textHeight = (doc.getTextDimensions(splitText).h);
       
       if (y + textHeight > pageHeight - margin) {
         doc.addPage();

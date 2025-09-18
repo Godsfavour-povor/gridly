@@ -617,6 +617,9 @@ export default function Home() {
     <div className="flex min-h-screen w-full flex-col bg-secondary">
       <Dialog open={showWelcome} onOpenChange={setShowWelcome}>
         <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Welcome Guide</DialogTitle>
+          </DialogHeader>
           {renderWelcomeStep()}
         </DialogContent>
       </Dialog>

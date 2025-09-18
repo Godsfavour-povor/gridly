@@ -26,7 +26,7 @@ const RETRY_CONFIG = {
 // Circuit breaker configuration
 const CIRCUIT_BREAKER_CONFIG = {
   failureThreshold: 5, // Open circuit after 5 consecutive failures
-  resetTimeout: 60000, // 1 minute before attempting to close circuit
+  resetTimeout: 15000, // 15 seconds before attempting to close circuit (reduced from 60s)
 };
 
 // Global service status tracker
@@ -53,6 +53,17 @@ export function resetServiceStatus(): void {
 
 export function forceCircuitBreakerReset(): void {
   resetServiceStatus();
+}
+
+// Add emergency reset function
+export function emergencyReset(): void {
+  serviceStatus = {
+    isHealthy: true,
+    lastFailureTime: 0,
+    consecutiveFailures: 0,
+    circuitBreakerOpen: false,
+  };
+  console.log('Emergency circuit breaker reset - service restored');
 }
 
 export async function withRetry<T>(

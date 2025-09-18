@@ -9,8 +9,9 @@
  */
 
 import {ai} from '@/ai/genkit';
+import {executeWithFallback} from '@/ai/genkit-fallback';
 import {z} from 'genkit';
-import { withRetry } from './ai-retry-utils';
+import { withRetry, emergencyReset } from './ai-retry-utils';
 
 const AISpreadsheetSummaryInputSchema = z.object({
   spreadsheetData: z
@@ -73,10 +74,15 @@ export type AISpreadsheetSummaryOutput = z.infer<typeof AISpreadsheetSummaryOutp
 export async function summarizeSpreadsheet(
   input: AISpreadsheetSummaryInput
 ): Promise<AISpreadsheetSummaryOutput> {
-  return withRetry(() => summarizeSpreadsheetFlow(input));
+  // First, try to reset circuit breaker in case it's stuck
+  emergencyReset();
+  
+  return executeWithFallback(async (aiInstance) => {
+    return withRetry(() => summarizeSpreadsheetFlow(input, aiInstance));
+  });
 }
 
-const summarizeSpreadsheetPrompt = ai.definePrompt({
+const summarizeSpreadsheetPrompt = (aiInstance: any) => aiInstance.definePrompt({
   name: 'summarizeSpreadsheetPrompt',
   input: {schema: AISpreadsheetSummaryInputSchema},
   output: {schema: AISpreadsheetSummaryOutputSchema},
@@ -124,14 +130,22 @@ const summarizeSpreadsheetPrompt = ai.definePrompt({
   Keep all explanations clear, specific, and actionable. Use numbers only when they add value and are explained.`,
 });
 
-const summarizeSpreadsheetFlow = ai.defineFlow(
+const createSummarizeSpreadsheetFlow = (aiInstance: any) => aiInstance.defineFlow(
   {
     name: 'summarizeSpreadsheetFlow',
     inputSchema: AISpreadsheetSummaryInputSchema,
     outputSchema: AISpreadsheetSummaryOutputSchema,
   },
-  async input => {
-    const {output} = await summarizeSpreadsheetPrompt(input);
+  async (input: AISpreadsheetSummaryInput) => {
+    const prompt = summarizeSpreadsheetPrompt(aiInstance);
+    const {output} = await prompt(input);
     return output!;
   }
 );
+
+async function summarizeSpreadsheetFlow(input: AISpreadsheetSummaryInput, aiInstance?: any): Promise<AISpreadsheetSummaryOutput> {
+  const instance = aiInstance || ai;
+  const prompt = summarizeSpreadsheetPrompt(instance);
+  const {output} = await prompt(input);
+  return output!;
+}

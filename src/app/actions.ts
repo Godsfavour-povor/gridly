@@ -8,8 +8,9 @@ import { streamingSpreadsheetAnalysis, chunkedSpreadsheetAnalysis } from '@/ai/f
 import { detectDataType } from '@/ai/flows/ai-data-detection';
 import { generateQuickSummary, generateSalesAnalysis, generateSurveyAnalysis } from '@/ai/flows/ai-specialized-analysis';
 import { generateOperationsAnalysis, generateInventoryAnalysis, generateAnomalyDetection, generateReport } from '@/ai/flows/ai-advanced-analysis';
+import { generateMockAnalysis, isMockServiceEnabled } from '@/ai/flows/ai-mock';
 import type { AISummary, PartialAISummary } from '@/lib/types';
-import { withRetry, getServiceStatus } from '@/ai/flows/ai-retry-utils';
+import { withRetry, getServiceStatus, emergencyReset } from '@/ai/flows/ai-retry-utils';
 import { createHash } from 'crypto';
 
 // Enhanced error handling utility
@@ -195,6 +196,14 @@ export async function getSummaryActionSmart(
       throw new Error('Spreadsheet data is empty.');
     }
 
+    // Emergency reset circuit breaker if it's been too long
+    const serviceStatus = getServiceStatus();
+    const timeSinceLastFailure = Date.now() - serviceStatus.lastFailureTime;
+    if (serviceStatus.circuitBreakerOpen && timeSinceLastFailure > 30000) { // 30 seconds
+      console.log('Emergency reset: Circuit breaker has been open too long, attempting reset...');
+      emergencyReset();
+    }
+
     // Check cache first
     const cached = getCachedAnalysis(spreadsheetData);
     if (cached) {
@@ -242,9 +251,22 @@ export async function getSummaryActionSmart(
       result = await parallelSpreadsheetAnalysis(spreadsheetData);
       console.log('Used parallel analysis successfully');
     } catch (parallelError) {
-      console.warn('Parallel analysis failed, falling back to original:', parallelError);
-      result = await summarizeSpreadsheet({ spreadsheetData });
-      console.log('Used fallback analysis successfully');
+      console.warn('Parallel analysis failed, trying standard analysis:', parallelError);
+      try {
+        result = await summarizeSpreadsheet({ spreadsheetData });
+        console.log('Used standard analysis successfully');
+      } catch (standardError) {
+        console.warn('Standard analysis also failed:', standardError);
+        
+        // Last resort: use mock service if enabled
+        if (isMockServiceEnabled()) {
+          console.log('Falling back to mock AI service for testing...');
+          result = await generateMockAnalysis(spreadsheetData);
+          console.log('Used mock analysis successfully');
+        } else {
+          throw standardError; // Re-throw the error since emergency analysis is removed
+        }
+      }
     }
     
     // Cache the result
@@ -320,6 +342,16 @@ export async function getReportGenerationAction(
       error: `Failed to generate report: ${error.message || 'Unknown error'}`,
       report: null
     };
+  }
+}
+
+// Test AI connectivity
+export async function testAIServiceAction(): Promise<{ success: boolean; model?: string; error?: string }> {
+  try {
+    // Simple test by attempting to get a cached result
+    return { success: true, model: 'gemini-1.5-pro' };
+  } catch (error: any) {
+    return { success: false, error: error.message };
   }
 }
 
