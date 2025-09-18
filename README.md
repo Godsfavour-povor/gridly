@@ -23,9 +23,10 @@
 - **Responsive Design**: Works seamlessly on desktop and mobile devices
 
 ### 🔒 **Privacy & Security**
-- **Client-Side Processing**: Your data is processed locally and never stored on our servers
-- **Secure Upload**: File type validation and secure handling
-- **Local Storage**: Analysis history stored locally on your device
+- **Local Parsing**: Your files are parsed in your browser. We do not upload file contents to our servers.
+- **AI Processing via API**: To generate summaries and answers, sampled/tabular text is sent to your configured AI provider (e.g., Google Gemini via Genkit). We do not persist your data server-side.
+- **Local Storage**: A small recent-history index and your last analyses are stored in your browser’s localStorage. You can delete them anytime from the Recents panel.
+- **Controls**: Large files are sampled before sending to AI to limit exposure and cost. See "Limits" below.
 
 ## 🏗️ Application Architecture
 
@@ -122,7 +123,13 @@ The application uses a sophisticated AI pipeline built on Google's Genkit framew
 
 1. **File Upload**: User uploads CSV/Excel file via drag-and-drop or file picker
 2. **Client Parsing**: File is parsed using XLSX library to extract structured data
-3. **AI Analysis**: Structured data is sent to AI flows for analysis
+3. **AI Analysis**: Sampled structured text is sent to AI flows for analysis (no server-side storage)
+## ⚖️ Limits
+
+- Per-file size hard cap (~15MB) and parse row cap (~50k rows) to avoid memory issues.
+- AI prompt sampling (~2k rows per file) for cost and latency control.
+- Multi-document uploads limited to the first 10 files at once.
+
 4. **Result Display**: Analysis results are displayed in interactive dashboard
 5. **Chat Interface**: Users can ask follow-up questions via AI chat
 6. **Local Storage**: Analysis results are stored locally for future access

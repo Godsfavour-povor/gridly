@@ -75,14 +75,45 @@ const FileUploader = React.forwardRef<
     e.stopPropagation();
     setIsDragging(false);
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      handleFile(e.dataTransfer.files[0]);
+      const list = Array.from(e.dataTransfer.files || []);
+      if (list.length > 0) processFiles(list);
     }
   };
+
+  const MAX_FILES = 10;
+  const MAX_FILE_SIZE_MB = 15; // hard cap per file
+  const MAX_ROWS_PER_FILE = 50000; // parsing cap (prevents extreme memory use)
+  const SAMPLE_ROWS_FOR_AI = 2000; // rows per file sent to AI (cost control)
+
+  function parseNumericString(value: string): number | null {
+    // Normalize common numeric formats: currency, percent, thousand separators
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    const percent = /%$/.test(trimmed);
+    const normalized = trimmed
+      .replace(/[$£€₦,\s]/g, '') // remove currency symbols, commas, spaces
+      .replace(/\((.*)\)/, '-$1'); // accounting negatives (e.g., (123))
+    const num = parseFloat(normalized);
+    if (!isFinite(num)) return null;
+    return percent ? num / 100 : num;
+  }
+
+  function toSampledCsvFromAOA(aoa: any[][], headerRowIndex = 0, maxRows = SAMPLE_ROWS_FOR_AI): string {
+    const headers = aoa[headerRowIndex] || [];
+    const dataRows = aoa.slice(headerRowIndex + 1);
+    const sampled = [headers, ...dataRows.slice(0, maxRows)];
+    const ws = XLSX.utils.aoa_to_sheet(sampled);
+    return XLSX.utils.sheet_to_csv(ws);
+  }
 
   const processFiles = (files: File[]) => {
     onProgress?.({ phase: 'preparing', current: 0, total: files.length, note: 'Preparing documents' });
     const allowed = ['text/csv', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.ms-excel'];
-    const valid = files.filter(f => allowed.includes(f.type));
+    let clipped = files.slice(0, MAX_FILES);
+    if (files.length > MAX_FILES) {
+      alert(`You selected ${files.length} files. Only the first ${MAX_FILES} will be processed.`);
+    }
+    const valid = clipped.filter(f => allowed.includes(f.type));
     if (valid.length === 0) {
       alert('Please upload a valid CSV, XLSX, or XLS file.');
       return;
@@ -94,6 +125,28 @@ const FileUploader = React.forwardRef<
     let remaining = valid.length;
 
     valid.forEach((file, index) => {
+      if (file.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
+        errors.push(`${file.name}: File exceeds ${MAX_FILE_SIZE_MB}MB limit`);
+        remaining -= 1;
+        if (remaining === 0) {
+          onProgress?.({ phase: 'combining', current: valid.length, total: valid.length, note: 'Combining documents' });
+          const combined = buildCombined(docs);
+          const first = docs[0];
+          onProcess({
+            parsedData: first?.parsedData || { headers: [], rows: [], numericColumns: [] },
+            stringData: first?.stringData || '',
+            metrics: first?.metrics || {},
+            errors,
+            fileName: first?.fileName || '',
+            documents: docs,
+            combinedParsedData: combined.combinedParsedData,
+            combinedStringData: combined.combinedStringData,
+            combinedMetrics: combined.combinedMetrics,
+            fileNames: docs.map(d => d.fileName),
+          });
+        }
+        return;
+      }
       const reader = new FileReader();
       const startedAt = performance.now();
       onProgress?.({ phase: 'reading', current: index, total: valid.length, note: `Reading ${file.name}` });
@@ -103,21 +156,32 @@ const FileUploader = React.forwardRef<
           const workbook = XLSX.read(data as ArrayBuffer, { type: 'array' });
           const sheetName = workbook.SheetNames[0];
           const worksheet = workbook.Sheets[sheetName];
-          const json: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1, raw: true, dense: true });
-          const stringData = XLSX.utils.sheet_to_csv(worksheet);
+          const json: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1, raw: true });
+          // Cap rows hard to prevent extreme memory/CPU
+          const limitedJson = json.length > (MAX_ROWS_PER_FILE + 1) ? [json[0], ...json.slice(1, MAX_ROWS_PER_FILE + 1)] : json;
+          // Build sampled CSV for AI (cost control)
+          const stringData = toSampledCsvFromAOA(limitedJson, 0, SAMPLE_ROWS_FOR_AI);
 
-          const headers = (json[0] as string[]) || [];
-          const rows = (json.slice(1) as any[][]) || [];
+          const headers = (limitedJson[0] as string[]) || [];
+          const rows = (limitedJson.slice(1) as any[][]) || [];
           const numericColumns: string[] = [];
           const metrics: Metrics = {};
 
           if (headers.length) {
             headers.forEach((header, colIndex) => {
               const values = rows.map(row => row[colIndex]).filter(v => v !== null && v !== undefined && v !== '');
-              const isNumeric = values.length > 0 && values.every(v => typeof v === 'number' || (typeof v === 'string' && !isNaN(parseFloat(v))));
+              const isNumeric = values.length > 0 && values.every(v => {
+                if (typeof v === 'number') return isFinite(v);
+                if (typeof v === 'string') return parseNumericString(v) != null;
+                return false;
+              });
               if (isNumeric) {
                 numericColumns.push(header);
-                const numericValues = values.map(v => typeof v === 'string' ? parseFloat(v) : v as number);
+                const numericValues = values.map(v => {
+                  if (typeof v === 'number') return v as number;
+                  const parsed = parseNumericString(String(v));
+                  return parsed == null ? NaN : parsed;
+                }).filter((n): n is number => typeof n === 'number' && isFinite(n));
                 const total = numericValues.reduce((sum, v) => sum + v, 0);
                 const average = total / numericValues.length;
                 const min = Math.min(...numericValues);

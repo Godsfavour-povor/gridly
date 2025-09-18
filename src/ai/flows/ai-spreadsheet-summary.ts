@@ -10,6 +10,7 @@
 
 import {ai} from '@/ai/genkit';
 import {z} from 'genkit';
+import { withRetry } from './ai-retry-utils';
 
 const AISpreadsheetSummaryInputSchema = z.object({
   spreadsheetData: z
@@ -72,28 +73,55 @@ export type AISpreadsheetSummaryOutput = z.infer<typeof AISpreadsheetSummaryOutp
 export async function summarizeSpreadsheet(
   input: AISpreadsheetSummaryInput
 ): Promise<AISpreadsheetSummaryOutput> {
-  return summarizeSpreadsheetFlow(input);
+  return withRetry(() => summarizeSpreadsheetFlow(input));
 }
 
 const summarizeSpreadsheetPrompt = ai.definePrompt({
   name: 'summarizeSpreadsheetPrompt',
   input: {schema: AISpreadsheetSummaryInputSchema},
   output: {schema: AISpreadsheetSummaryOutputSchema},
-  prompt: `You are an expert data analyst AI. Your task is to provide a comprehensive analysis of the given spreadsheet data for a business manager.
-  Be thorough, clear, and provide actionable insights. Refer to specific columns and rows when possible.
+  prompt: `You are a data analyst that explains findings in simple, clear, and actionable terms.
 
   Here is the spreadsheet data:
   {{spreadsheetData}}
 
-  Please perform the following analysis and structure your output according to the defined schema:
+  Analyze this data and structure your response following these rules:
+  
+  1. **Key Insights**: Provide 3-5 main discoveries in plain English. Focus on:
+     - Major trends or patterns you found
+     - Significant totals, averages, or outliers
+     - Business-critical observations
+     - Surprising or unexpected findings
+     
+     Format each insight clearly without jargon. Example:
+     - "Sales increased 25% from January to March"
+     - "Customer satisfaction scores are highest on weekends"
 
-  1.  **Key Insights**: Generate a list of 3-5 high-level, critical insights that a manager should know immediately. These should cover major trends, significant totals, or surprising findings.
+  2. **Column Analysis**: For each important column, explain:
+     - What the data shows in simple terms
+     - Key patterns (highest/lowest values, trends)
+     - Any notable distributions or concentrations
+     - Business relevance in practical terms
+     
+     Use clear language. Instead of "statistical variance", say "values range widely".
 
-  2.  **Column-by-Column Analysis**: For each numeric or otherwise significant column, provide a \`columnAnalyses\` entry. In your description, detail the trends, distribution (e.g., min, max, average), and any noteworthy patterns or concentrations of data.
+  3. **Row-Level Findings**: Identify specific noteworthy records:
+     - Outliers ("Row 15 has the highest sales at $50,000")
+     - Representative examples of trends
+     - Anomalies that need attention
+     - Records that illustrate key patterns
+     
+     Always reference by row number or clear identifier.
 
-  3.  **Row-Level Findings**: Identify and create \`rowLevelFindings\` for any specific rows that stand out. This includes outliers (e.g., the row with the highest sale, the product with the lowest stock), records that are particularly representative of a trend, or any anomalies. Refer to the row by its number or by a unique identifier if a clear one exists (like a name or ID column).
-
-  4.  **Data Quality Issues**: Carefully examine the data for any quality problems. Create \`dataQualityIssues\` for things like missing values, inconsistent formatting (e.g., dates in different formats), or logical errors. For each issue, describe the problem and recommend a specific action to fix it (e.g., "In column 'Revenue', cell C5 is empty. Consider filling it with the average revenue or removing the row if it's incomplete.").`,
+  4. **Data Quality Issues**: Find problems and give practical solutions:
+     - Missing values ("Column C has 5 empty cells")
+     - Format inconsistencies ("Dates in mixed formats")
+     - Logical errors ("Negative quantities in inventory")
+     - Data type issues
+     
+     For each issue, provide a specific, actionable recommendation.
+     
+  Keep all explanations clear, specific, and actionable. Use numbers only when they add value and are explained.`,
 });
 
 const summarizeSpreadsheetFlow = ai.defineFlow(

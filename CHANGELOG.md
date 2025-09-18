@@ -7,47 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
-- Fixed AI chat interface layout to use full viewport height, eliminating need to scroll to see input field
-- Improved dashboard layout responsiveness with proper height constraints
-- Updated logo component to use gridly-logo.png instead of SVG logo
-- Created public directory and moved logo asset for proper Next.js static serving
-- Increased logo size in header from h-8 to h-12 for better visibility
-
 ### Added
-- Initial application setup with comprehensive AI-powered spreadsheet analysis
-- Welcome dialog for first-time users with step-by-step onboarding
-- File upload functionality supporting CSV, XLSX, and XLS formats
-- Drag-and-drop file upload interface
-- Real-time AI analysis with loading states and progress messages
-- Interactive dashboard with tabbed interface (AI Analysis & Data Explorer)
-- AI-powered chat interface for follow-up questions about data
-- Recent files history with local storage persistence
-- PDF export functionality for analysis reports
-- Data visualization with line and bar charts for numeric columns
-- Raw data table viewer with first 100 rows display
-- Responsive design with mobile-friendly layout
+- Multi-document ingestion: upload multiple CSV/XLSX/XLS files in one session; union schema with a synthetic `Document` column.
+- Combined analysis pipeline: builds a `combinedParsedData` and `combinedStringData` that tag each section with `### Document: <fileName>`.
+- Source-aware AI summaries: new server action `getSummaryActionMulti` generates a combined summary and per-document summaries; prompts enforce explicit source citation.
+- Source-aware chat: questions use the combined dataset (when present) and instruct AI to cite sources, e.g., “(Source: file.xlsx)”.
+- Per-document reporting UI: AI Analysis tab now includes a “Per-Document Analysis” accordion (Key Insights per file).
+- Cross-document PDF export: first renders Cross-Document sections, then appends individual sections per source document.
+- Data Explorer improvements: prefers combined dataset when present; Document appears as a category; legends constrained with tidy chip lists.
+- Mobile chat experience: floating button opens a bottom sheet with the chat panel; desktop retains sidebar.
+- Dynamic progress and ETA: uploader emits granular progress events (preparing/reading/combining) and the page shows phase-specific text and estimated time remaining; analysis ETA during AI processing.
 
-### AI Features
-- **Spreadsheet Summary**: Comprehensive analysis including key insights, column-by-column analysis, row-level findings, and data quality issues
-- **Question Answering**: Natural language Q&A interface for data exploration
-- **Forecasting**: AI-powered predictions with confidence levels and assumptions
-- Integration with Google's Gemini 2.5 Flash model via Genkit
+### Changed
+- Performance: switched spreadsheet parsing to `FileReader.readAsArrayBuffer` and `XLSX.read(type: 'array')`; used `sheet_to_json(..., raw: true, dense: true)` to reduce overhead.
+- Dashboard: defaults category to `Document` when available; visual components use the combined dataset for charts/filters/tables where applicable.
+- Chat data source: prefers `combinedStringData` (when multi-doc) to ensure answers consider all uploaded documents.
+- PDF: consolidated Cross-Document headings and added per-document sections for clarity and traceability.
 
-### Technical Implementation
-- Next.js 15.3.3 with TypeScript and App Router
-- Tailwind CSS for styling with custom design system
-- Shadcn/ui component library for consistent UI elements
-- XLSX library for spreadsheet parsing
-- Recharts for data visualization
-- React Hook Form for form management
-- Local storage for data persistence
-- Firebase integration ready (apphosting.yaml configured)
+### Fixed
+- Improved monthly trend rendering with guards and friendlier fallbacks when a date column is not detected.
+- Donut legends no longer overflow; long category lists are summarized and contained in scrollable chip containers.
 
-### Security & Privacy
-- Client-side file processing (data not stored on servers)
-- Secure file upload with type validation
-- Local storage for analysis history
+### Developer Notes
+- Types: `DocumentData` introduced; `AnalysisResult` extended with `documents`, `combinedParsedData`, `combinedStringData`, `combinedMetrics`, `documentSummaries`, `combinedSummary` (all optional for backward compatibility).
+- New action: `getSummaryActionMulti(documents, combinedStringData)` in `src/app/actions.ts`.
+- Controller wiring in `src/app/page.tsx`: multi-doc flow, chat over combined data, enhanced PDF export, dynamic progress + ETA.
+- File uploader in `src/components/file-uploader.tsx`: multiple file parsing, union/merge, progress emission, improved performance.
+- Dashboard in `src/components/analysis-dashboard.tsx`: prefers combined dataset, “Per-Document Analysis” accordion, Document default category, and Compare-friendly visuals.
 
 ---
 

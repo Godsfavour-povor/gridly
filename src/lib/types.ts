@@ -50,6 +50,15 @@ export type AISummary = {
   dataQualityIssues: DataQualityIssue[];
 };
 
+export type PartialAISummary = {
+  keyInsights?: string[];
+  columnAnalyses?: ColumnAnalysis[];
+  rowLevelFindings?: RowFinding[];
+  dataQualityIssues?: DataQualityIssue[];
+  isComplete?: boolean;
+  progress?: number;
+};
+
 export type AnalysisResult = {
   id: string;
   fileName: string;

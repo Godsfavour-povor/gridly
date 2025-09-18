@@ -32,8 +32,7 @@ const prompt = ai.definePrompt({
   name: 'aiForecastingPrompt',
   input: {schema: AIForecastingInputSchema},
   output: {schema: AIForecastingOutputSchema},
-  prompt: `You are an AI assistant that specializes in forecasting from spreadsheet data.
-  Analyze the historical data provided to make a prediction based on the user's question.
+  prompt: `You are a business analyst that creates clear, practical forecasts from data.
 
   Here is the spreadsheet data:
   {{spreadsheetData}}
@@ -41,11 +40,23 @@ const prompt = ai.definePrompt({
   Here is the question:
   {{question}}
 
-  Based on the data, provide a forecast. Your response must include:
-  1. A direct answer to the user's question (the 'forecast').
-  2. Your confidence in this forecast ('High', 'Medium', or 'Low'). A 'High' confidence requires clear, strong trends. 'Medium' is for less clear trends, and 'Low' is for volatile or sparse data.
-  3. A list of assumptions you made (e.g., "Assumes past trends will continue," "Ignores external market factors not in the data").
-  `,
+  Provide a forecast that business managers can understand and act on:
+
+  1. **Forecast**: Give a direct, specific answer in plain English. Include concrete numbers or ranges when possible.
+     - Good: "Sales will likely reach $85,000-$95,000 next quarter"
+     - Avoid: "Sales show positive trends"
+
+  2. **Confidence Level**: 
+     - High: Clear, strong patterns with consistent data
+     - Medium: Some trends visible but with variability
+     - Low: Limited data or highly volatile patterns
+
+  3. **Assumptions**: List the key assumptions behind your forecast:
+     - "Assumes current growth rate continues"
+     - "Based on seasonal patterns from last year"
+     - "Excludes potential market disruptions"
+
+  Be specific and actionable. Explain what the numbers mean for business decisions.`,
 });
 
 const aiForecastingFlow = ai.defineFlow(

@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { getChatResponseAction, getSummaryAction, getSummaryActionMulti } from '@/app/actions';
+import { getChatResponseAction, getSummaryActionOptimized, getSummaryActionSmart, getSummaryActionStreaming, getSummaryActionMulti, getQuickSummaryAction, getAnomalyDetectionAction } from '@/app/actions';
 import AnalysisDashboard from '@/components/analysis-dashboard';
 import FileUploader from '@/components/file-uploader';
 import { Logo } from '@/components/icons';
@@ -13,24 +13,28 @@ import type {
   Metrics,
   ParsedData,
   RecentFile,
+  PartialAISummary,
 } from '@/lib/types';
-import { Download, ShieldCheck, UploadCloud, BrainCircuit, MessageSquare, ArrowRight, History, Trash2, FileText } from 'lucide-react';
+import { Download, ShieldCheck, UploadCloud, BrainCircuit, MessageSquare, ArrowRight, History, Trash2, FileText, LoaderCircle, Sparkles } from 'lucide-react';
 import jsPDF from 'jspdf';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
+import { Progress } from '@/components/ui/progress';
 
 const loadingMessages = [
   'Reading your spreadsheet...',
-  'Analyzing the data...',
-  'Identifying key trends...',
-  'Checking for data quality issues...',
-  'Generating insights...',
-  'Almost done...',
+  'Extracting insights in parallel...',
+  'Analyzing columns and patterns...',
+  'Checking for outliers and anomalies...',
+  'Performing quality checks...',
+  'Finalizing analysis...',
 ];
 
 export default function Home() {
   const [analysisResult, setAnalysisResult] =
     React.useState<AnalysisResult | null>(null);
+  const [partialResult, setPartialResult] = 
+    React.useState<PartialAISummary | null>(null);
   const [isLoading, setIsLoading] = React.useState(false);
   const [loadingMessage, setLoadingMessage] = React.useState(loadingMessages[0]);
   const [error, setError] = React.useState<string | null>(null);
@@ -47,17 +51,29 @@ export default function Home() {
   const analysisEtaTimer = React.useRef<NodeJS.Timeout | null>(null);
 
   React.useEffect(() => {
-    const hasVisited = localStorage.getItem('hasVisited');
-    if (!hasVisited) {
-      setShowWelcome(true);
-      localStorage.setItem('hasVisited', 'true');
-    }
+    try {
+      const hasVisited = localStorage.getItem('hasVisited');
+      if (!hasVisited) {
+        setShowWelcome(true);
+        localStorage.setItem('hasVisited', 'true');
+      }
+    } catch {}
     loadRecentFiles();
   }, []);
 
   const loadRecentFiles = () => {
-    const files = JSON.parse(localStorage.getItem('recentFiles') || '[]');
-    setRecentFiles(files);
+    try {
+      const raw = localStorage.getItem('recentFiles');
+      if (!raw) {
+        setRecentFiles([]);
+        return;
+      }
+      const files = JSON.parse(raw);
+      if (Array.isArray(files)) setRecentFiles(files);
+      else setRecentFiles([]);
+    } catch {
+      setRecentFiles([]);
+    }
   };
 
   React.useEffect(() => {
@@ -113,75 +129,100 @@ export default function Home() {
     }
 
     try {
-      const multi = documents && documents.length > 1;
+        const multi = documents && documents.length > 1;
 
-      if (multi) {
-        // Start ETA based on combined rows and doc count
-        const rowsForEta = (combinedParsedData?.rows?.length ?? parsedData.rows.length) as number;
-        const docsForEta = documents?.length ?? 1;
-        startAnalysisETA(rowsForEta, docsForEta);
-        const { combinedSummary, perDoc, error: multiErr } = await getSummaryActionMulti(
-          documents.map((d: any) => ({ fileName: d.fileName, stringData: d.stringData })),
-          combinedStringData
-        );
-        clearAnalysisETA();
-        if (multiErr) throw new Error(multiErr);
+        if (multi) {
+          // Start ETA based on combined rows and doc count
+          const rowsForEta = (combinedParsedData?.rows?.length ?? parsedData.rows.length) as number;
+          const docsForEta = documents?.length ?? 1;
+          startAnalysisETA(rowsForEta, docsForEta);
+          const { combinedSummary, perDoc, error: multiErr } = await getSummaryActionMulti(
+            documents.map((d: any) => ({ fileName: d.fileName, stringData: d.stringData })),
+            combinedStringData
+          );
+          clearAnalysisETA();
+          if (multiErr) throw new Error(multiErr);
 
-        const id = new Date().toISOString();
-        const createdAt = new Date().toISOString();
-        const filesLabel = `${fileNames.length} documents: ${fileNames.slice(0, 2).join(', ')}${fileNames.length > 2 ? '…' : ''}`;
+          const id = new Date().toISOString();
+          const createdAt = new Date().toISOString();
+          const filesLabel = `${fileNames.length} documents: ${fileNames.slice(0, 2).join(', ')}${fileNames.length > 2 ? '…' : ''}`;
 
-        const result: AnalysisResult = {
-          id,
-          fileName: filesLabel,
-          createdAt,
-          parsedData,
-          stringData,
-          metrics,
-          documents,
-          combinedParsedData,
-          combinedStringData,
-          combinedMetrics,
-          documentSummaries: perDoc,
-          combinedSummary,
-          summary: combinedSummary,
-          chatHistory: [
-            {
-              sender: 'ai',
-              text: `Analyzed ${fileNames.length} documents. Ask a question and I will cite sources in the answer.`,
-            },
-          ],
-        };
+          const result: AnalysisResult = {
+            id,
+            fileName: filesLabel,
+            createdAt,
+            parsedData,
+            stringData,
+            metrics,
+            documents,
+            combinedParsedData,
+            combinedStringData,
+            combinedMetrics,
+            documentSummaries: perDoc,
+            combinedSummary,
+            summary: combinedSummary,
+            chatHistory: [
+              {
+                sender: 'ai',
+                text: `Analyzed ${fileNames.length} documents. Ask a question and I will cite sources in the answer.`,
+              },
+            ],
+          };
 
-        setAnalysisResult(result);
-        saveRecentFile({ ...result, summary: combinedSummary });
-      } else {
-        // Single document ETA
-        const rowsForEta = parsedData.rows.length;
-        startAnalysisETA(rowsForEta, 1);
-        const summaryResult = await getSummaryAction(stringData);
-        clearAnalysisETA();
-        if (summaryResult.error) {
-          throw new Error(summaryResult.error);
+          setAnalysisResult(result);
+          saveRecentFile({ ...result, summary: combinedSummary });
+        } else {
+          // Single document - use smart analysis that auto-detects data type
+          const rowsForEta = parsedData.rows.length;
+          startAnalysisETA(rowsForEta, 1);
+          
+          // Use the smart action that detects data type and applies specialized analysis
+          const summaryResult = await getSummaryActionSmart(
+            stringData, 
+            parsedData.headers
+          );
+          clearAnalysisETA();
+          
+          if (summaryResult.error) {
+            throw new Error(summaryResult.error);
+          }
+          
+          // Show cache hit notification
+          if (summaryResult.fromCache) {
+            toast({
+              title: 'Analysis Retrieved',
+              description: 'Found cached analysis for this file - instant results!',
+            });
+          }
+          
+          // Show specialized analysis mode notification
+          if (summaryResult.analysisMode && summaryResult.analysisMode !== 'general') {
+            toast({
+              title: 'Smart Analysis Applied',
+              description: `Detected ${summaryResult.analysisMode.replace('_', ' ')} data - using specialized insights!`,
+            });
+          }
+          
+          const result: AnalysisResult = {
+            id: new Date().toISOString(),
+            fileName,
+            createdAt: new Date().toISOString(),
+            parsedData,
+            stringData,
+            metrics,
+            summary: summaryResult.summary,
+            chatHistory: [
+              {
+                sender: 'ai',
+                text: summaryResult.analysisMode && summaryResult.analysisMode !== 'general' 
+                  ? `Hello! I've analyzed your ${summaryResult.analysisMode.replace('_', ' ')} data using specialized insights. I found key patterns, trends, and actionable recommendations. What specific questions do you have?`
+                  : `Hello! I've analyzed your spreadsheet and broken it down into key insights, column-specific details, and data quality checks. What specific questions do you have? You can also ask for a forecast (e.g., "project sales for next quarter").`,
+              },
+            ],
+          };
+          setAnalysisResult(result);
+          saveRecentFile(result);
         }
-        const result: AnalysisResult = {
-          id: new Date().toISOString(),
-          fileName,
-          createdAt: new Date().toISOString(),
-          parsedData,
-          stringData,
-          metrics,
-          summary: summaryResult.summary,
-          chatHistory: [
-            {
-              sender: 'ai',
-              text: `Hello! I've analyzed your spreadsheet and broken it down into key insights, column-specific details, and data quality checks. What specific questions do you have? You can also ask for a forecast (e.g., "project sales for next quarter").`,
-            },
-          ],
-        };
-        setAnalysisResult(result);
-        saveRecentFile(result);
-      }
 
     } catch (e: any) {
       const errorMessage =
@@ -198,36 +239,50 @@ export default function Home() {
   };
 
   const saveRecentFile = (result: AnalysisResult) => {
-    const currentFiles: RecentFile[] = JSON.parse(localStorage.getItem('recentFiles') || '[]');
-    const newFile: RecentFile = {
-      id: result.id,
-      fileName: result.fileName,
-      createdAt: result.createdAt,
-      summary: result.summary.keyInsights.slice(0, 2).join(' '),
-    };
-    const updatedFiles = [newFile, ...currentFiles.filter(f => f.id !== result.id)].slice(0, 10); // Keep last 10
-    localStorage.setItem('recentFiles', JSON.stringify(updatedFiles));
-    localStorage.setItem(`analysis_${result.id}`, JSON.stringify(result));
+    try {
+      const currentRaw = localStorage.getItem('recentFiles');
+      const currentFiles: RecentFile[] = currentRaw ? JSON.parse(currentRaw) : [];
+      const newFile: RecentFile = {
+        id: result.id,
+        fileName: result.fileName,
+        createdAt: result.createdAt,
+        summary: result.summary.keyInsights.slice(0, 2).join(' '),
+      };
+      const updatedFiles = [newFile, ...currentFiles.filter(f => f.id !== result.id)].slice(0, 10);
+      // Store a slim index + the full analysis separately
+      localStorage.setItem('recentFiles', JSON.stringify(updatedFiles));
+      // Guard against quota errors
+      try {
+        localStorage.setItem(`analysis_${result.id}`, JSON.stringify(result));
+      } catch {
+        // If quota exceeded, drop oldest and retry once
+        const trimmed = updatedFiles.slice(0, Math.max(0, updatedFiles.length - 1));
+        localStorage.setItem('recentFiles', JSON.stringify(trimmed));
+        try { localStorage.setItem(`analysis_${result.id}`, JSON.stringify(result)); } catch {}
+      }
+    } catch {}
     loadRecentFiles();
   }
 
   const loadAnalysis = (id: string) => {
-    const data = localStorage.getItem(`analysis_${id}`);
-    if (data) {
-      setAnalysisResult(JSON.parse(data));
-    } else {
-      toast({
-        variant: 'destructive',
-        title: 'Error',
-        description: 'Could not find the analysis data for this file.'
-      });
-    }
+    try {
+      const data = localStorage.getItem(`analysis_${id}`);
+      if (data) {
+        setAnalysisResult(JSON.parse(data));
+        return;
+      }
+    } catch {}
+    toast({
+      variant: 'destructive',
+      title: 'Error',
+      description: 'Could not find the analysis data for this file.'
+    });
   }
   
   const deleteAnalysis = (id: string) => {
-    localStorage.removeItem(`analysis_${id}`);
+    try { localStorage.removeItem(`analysis_${id}`); } catch {}
     const updatedFiles = recentFiles.filter(f => f.id !== id);
-    localStorage.setItem('recentFiles', JSON.stringify(updatedFiles));
+    try { localStorage.setItem('recentFiles', JSON.stringify(updatedFiles)); } catch {}
     setRecentFiles(updatedFiles);
     toast({
       title: 'Deleted',
@@ -621,23 +676,126 @@ export default function Home() {
 
       <main className="flex-1 overflow-hidden">
         {!analysisResult ? (
-          <div className="container mx-auto max-w-4xl py-24 text-center h-full flex flex-col justify-center">
-            <h1 className="text-5xl font-bold tracking-tighter">
-              Summarize spreadsheets in seconds.
-            </h1>
-            <p className="mt-4 text-lg text-muted-foreground">
-              Upload Excel/CSV → get instant plain-English summary.
-            </p>
-            <div className='mt-8'>
-              <FileUploader ref={fileUploaderRef} onProcess={handleFileProcess} onProgress={handleProgress} isLoading={isLoading} loadingMessage={loadingMessage}>
-                <Button size="lg" onClick={handleTriggerUpload} disabled={isLoading}>
-                  {isLoading ? 'Analyzing...' : 'Try it Free'}
-                </Button>
-              </FileUploader>
-              <p className="mt-4 flex items-center justify-center gap-2 text-sm text-muted-foreground">
-                <ShieldCheck className="h-4 w-4 text-green-500" />
-                Secure upload, your data isn't stored.
-              </p>
+          <div className="relative min-h-screen">
+            {/* Hero Section with Gradient Background */}
+            <div className="absolute inset-0 bg-gradient-to-br from-violet-600/20 via-blue-600/20 to-emerald-600/20 dark:from-violet-600/10 dark:via-blue-600/10 dark:to-emerald-600/10" />
+            <div className="absolute inset-0 bg-[linear-gradient(45deg,transparent_24%,rgba(255,255,255,.05)_25%,rgba(255,255,255,.05)_26%,transparent_27%,transparent_74%,rgba(255,255,255,.05)_75%,rgba(255,255,255,.05)_76%,transparent_77%,transparent)] bg-[length:30px_30px]" />
+            
+            <div className="relative container mx-auto max-w-6xl py-16 px-6">
+              {/* Main Hero Content */}
+              <div className="text-center space-y-8">
+                <div className="space-y-4">
+                  <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-gradient-to-r from-violet-100 to-blue-100 dark:from-violet-900/30 dark:to-blue-900/30 text-sm font-medium text-violet-700 dark:text-violet-300">
+                    <Sparkles className="h-4 w-4" />
+                    AI-Powered Analysis
+                  </div>
+                  <h1 className="text-6xl md:text-7xl lg:text-8xl font-black tracking-tighter bg-gradient-to-r from-violet-600 via-blue-600 to-emerald-600 bg-clip-text text-transparent">
+                    Gridly
+                  </h1>
+                  <p className="text-xl md:text-2xl text-muted-foreground max-w-2xl mx-auto leading-relaxed">
+                    Transform your spreadsheets into <span className="text-violet-600 font-semibold">actionable insights</span> in seconds with AI-powered analysis
+                  </p>
+                </div>
+
+                {/* Feature Pills */}
+                <div className="flex flex-wrap justify-center gap-3 mt-8">
+                  {[
+                    { icon: UploadCloud, text: "Instant Upload", color: "bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300" },
+                    { icon: BrainCircuit, text: "AI Analysis", color: "bg-violet-50 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300" },
+                    { icon: MessageSquare, text: "Chat Interface", color: "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300" },
+                    { icon: ShieldCheck, text: "Secure & Private", color: "bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300" }
+                  ].map((feature, index) => (
+                    <div key={index} className={`flex items-center gap-2 px-4 py-2 rounded-full ${feature.color} transition-transform hover:scale-105`}>
+                      <feature.icon className="h-4 w-4" />
+                      <span className="text-sm font-medium">{feature.text}</span>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Upload Section */}
+                <div className="mt-12">
+                  <FileUploader ref={fileUploaderRef} onProcess={handleFileProcess} onProgress={handleProgress} isLoading={isLoading} loadingMessage={loadingMessage}>
+                    <div className="space-y-6">
+                      <Button 
+                        size="lg" 
+                        onClick={handleTriggerUpload} 
+                        disabled={isLoading}
+                        className="h-14 px-8 text-lg bg-gradient-to-r from-violet-600 to-blue-600 hover:from-violet-700 hover:to-blue-700 shadow-lg shadow-violet-500/25 transition-all duration-300 hover:scale-105 hover:shadow-xl hover:shadow-violet-500/40"
+                      >
+                        {isLoading ? (
+                          <>
+                            <LoaderCircle className="mr-3 h-5 w-5 animate-spin" />
+                            Analyzing...
+                          </>
+                        ) : (
+                          <>
+                            <UploadCloud className="mr-3 h-5 w-5" />
+                            Upload & Analyze
+                          </>
+                        )}
+                      </Button>
+                      
+                      {/* Loading Progress */}
+                      {isLoading && (
+                        <div className="max-w-md mx-auto space-y-3">
+                          <div className="flex items-center justify-between text-sm">
+                            <span className="text-muted-foreground">{loadingMessage}</span>
+                            {etaMs > 0 && (
+                              <span className="text-violet-600 font-medium">
+                                ~{Math.ceil(etaMs/1000)}s
+                              </span>
+                            )}
+                          </div>
+                          <Progress 
+                            value={progressTotal > 0 ? (progressCurrent / progressTotal) * 100 : undefined} 
+                            className="h-2"
+                          />
+                        </div>
+                      )}
+                      
+                      <p className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
+                        <ShieldCheck className="h-4 w-4 text-emerald-500" />
+                        Secure processing • No data stored • GDPR compliant
+                      </p>
+                    </div>
+                  </FileUploader>
+                </div>
+              </div>
+
+              {/* Feature Grid */}
+              <div className="mt-24 grid md:grid-cols-3 gap-8">
+                {[
+                  {
+                    icon: BrainCircuit,
+                    title: "Smart AI Analysis",
+                    description: "Advanced AI extracts key insights, trends, and anomalies from your data automatically",
+                    color: "violet"
+                  },
+                  {
+                    icon: MessageSquare,
+                    title: "Interactive Chat",
+                    description: "Ask questions in natural language and get instant, contextual answers about your data",
+                    color: "blue"
+                  },
+                  {
+                    icon: Download,
+                    title: "Export Reports",
+                    description: "Generate professional PDF reports with charts, insights, and recommendations",
+                    color: "emerald"
+                  }
+                ].map((feature, index) => (
+                  <div key={index} className="group relative">
+                    <div className="absolute inset-0 bg-gradient-to-r from-white/10 to-white/5 rounded-2xl blur-xl transition-all duration-500 group-hover:blur-2xl" />
+                    <div className="relative p-8 rounded-2xl bg-white/80 dark:bg-gray-900/80 backdrop-blur-sm border border-white/20 dark:border-gray-700/50 transition-all duration-300 hover:scale-[1.02] hover:shadow-xl hover:shadow-black/10">
+                      <div className={`inline-flex p-3 rounded-xl bg-gradient-to-r ${feature.color === 'violet' ? 'from-violet-500 to-purple-500' : feature.color === 'blue' ? 'from-blue-500 to-cyan-500' : 'from-emerald-500 to-teal-500'} mb-4`}>
+                        <feature.icon className="h-6 w-6 text-white" />
+                      </div>
+                      <h3 className="text-xl font-bold mb-3">{feature.title}</h3>
+                      <p className="text-muted-foreground leading-relaxed">{feature.description}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         ) : (
